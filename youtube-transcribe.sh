@@ -116,18 +116,15 @@ detect_language() {
             elif echo "$result" | grep -qiE "(the|and|that|this|with|from|have|are|was|were|been|being|what|when|where|which|who|will|would|could|should|there|their|about|into|some|than|them|then|these|time|very|just|know|take|come|made|find|here|many|only|other|over|such|than|through)"; then
                 echo "en"
                 return 0
-            else
-                # Got content but couldn't determine language, use auto
-                echo "auto"
-                return 0
+            # If we got content but couldn't match DE or EN, keep trying
             fi
         fi
         
         echo "Attempt $attempt: No clear language detected, trying another position..." >&2
     done
     
-    # Fallback to English after max attempts
-    echo "en"
+    # After max attempts, return empty to signal failure
+    echo ""
 }
 
 # Get duration in seconds for language detection
@@ -227,8 +224,13 @@ echo "Detecting language..." >&2
 if [[ "$LANG" == "auto" ]]; then
     DURATION_SECS=$(get_duration_seconds "$DURATION")
     DETECTED_LANG=$(detect_language "$WAV_FILE" "$DURATION_SECS")
-    echo "Detected language: $DETECTED_LANG" >&2
-    LANG="$DETECTED_LANG"
+    if [[ -n "$DETECTED_LANG" ]]; then
+        echo "Detected language: $DETECTED_LANG" >&2
+        LANG="$DETECTED_LANG"
+    else
+        echo "Could not detect language after 10 attempts, using auto" >&2
+        # LANG stays "auto", whisper will try its best
+    fi
 fi
 
 # Transcribe
