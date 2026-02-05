@@ -6,7 +6,9 @@ set -e
 
 # === CONFIGURATION ===
 YTDLP="${YTDLP:-/opt/homebrew/bin/python3.11 -m yt_dlp}"
-YTDLP_OPTS="--cookies ~/.config/yt-dlp/cookies.txt --remote-components ejs:github"
+COOKIES_MASTER="$HOME/.config/yt-dlp/cookies_master.txt"
+COOKIES_TMP="/tmp/yt_cookies_$$.txt"
+YTDLP_OPTS="--cookies $COOKIES_TMP --remote-components ejs:github"
 WHISPER="${WHISPER:-/opt/homebrew/bin/whisper-cli}"
 WHISPER_MODEL="${WHISPER_MODEL:-$HOME/.whisper/ggml-medium.bin}"
 TMP_DIR="${TMP_DIR:-/tmp/yt_transcribe}"
@@ -169,8 +171,16 @@ fi
 # === MAIN ===
 mkdir -p "$TMP_DIR"
 mkdir -p "$OUTPUT_DIR"
-trap 'notify_error "Unbekannt" "Script abgebrochen"; cleanup' ERR
-trap cleanup EXIT
+
+# Copy master cookies to temp (so yt-dlp doesn't overwrite the original)
+if [[ -f "$COOKIES_MASTER" ]]; then
+    cp "$COOKIES_MASTER" "$COOKIES_TMP"
+else
+    echo "Warning: No master cookies file found at $COOKIES_MASTER" >&2
+fi
+
+trap 'notify_error "Unbekannt" "Script abgebrochen"; rm -f "$COOKIES_TMP"; cleanup' ERR
+trap 'rm -f "$COOKIES_TMP"; cleanup' EXIT
 
 echo "=== YouTube Transcriber ===" >&2
 echo "URL: $URL" >&2
