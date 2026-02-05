@@ -126,8 +126,8 @@ detect_language() {
         echo "Attempt $attempt: No clear language detected, trying another position..." >&2
     done
     
-    # Fallback to German after max attempts
-    echo "de"
+    # Fallback to English after max attempts
+    echo "en"
 }
 
 # Get duration in seconds for language detection
