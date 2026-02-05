@@ -11,21 +11,21 @@
 set -e
 
 # === CONFIGURATION ===
-# Adjust paths to match your system
-YTDLP="${YTDLP:-yt-dlp}"
-WHISPER="${WHISPER:-whisper-cli}"
+YTDLP="${YTDLP:-/Users/andrej/Library/Python/3.9/bin/yt-dlp}"
+WHISPER="${WHISPER:-/opt/homebrew/bin/whisper-cli}"
 WHISPER_MODEL="${WHISPER_MODEL:-$HOME/.whisper/ggml-medium.bin}"
 TMP_DIR="${TMP_DIR:-/tmp/yt_transcribe}"
-OUTPUT_DIR="${OUTPUT_DIR:-.}"
+OUTPUT_DIR="${OUTPUT_DIR:-$HOME/.openclaw/workspace/youtube-transcriber/transcripts}"
 
 # === FUNCTIONS ===
 usage() {
     echo "Usage: $0 <youtube-url> [options]"
     echo ""
     echo "Options:"
-    echo "  -o, --output DIR    Output directory (default: current dir)"
+    echo "  -o, --output DIR    Output directory (default: ~/transcripts)"
     echo "  -l, --language LANG Force language (default: auto)"
     echo "  -t, --transcript    Output transcript only (no VTT)"
+    echo "  -b, --background    Run in background, notify when done"
     echo "  -h, --help          Show this help"
     exit 1
 }
@@ -34,16 +34,27 @@ cleanup() {
     rm -rf "$TMP_DIR"
 }
 
+notify_openclaw() {
+    local title="$1"
+    local transcript_file="$2"
+    local video_id="$3"
+    
+    # Wake OpenClaw with context
+    openclaw cron wake --text "YouTube-Transkription fertig: \"$title\" - Datei: $transcript_file (Video-ID: $video_id). Bitte Zusammenfassung und Faktencheck erstellen." --mode now 2>/dev/null || true
+}
+
 # === ARGUMENT PARSING ===
 URL=""
 LANG="auto"
 TRANSCRIPT_ONLY=false
+BACKGROUND=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         -o|--output) OUTPUT_DIR="$2"; shift 2 ;;
         -l|--language) LANG="$2"; shift 2 ;;
         -t|--transcript) TRANSCRIPT_ONLY=true; shift ;;
+        -b|--background) BACKGROUND=true; shift ;;
         -h|--help) usage ;;
         -*) echo "Unknown option: $1"; usage ;;
         *) URL="$1"; shift ;;
@@ -95,17 +106,35 @@ if [[ "$LANG" != "auto" ]]; then
     LANG_FLAG="-l $LANG"
 fi
 
-if $TRANSCRIPT_ONLY; then
-    "$WHISPER" -m "$WHISPER_MODEL" -f "$WAV_FILE" $LANG_FLAG --no-timestamps 2>/dev/null
-else
-    # Output VTT format
-    "$WHISPER" -m "$WHISPER_MODEL" -f "$WAV_FILE" $LANG_FLAG --output-vtt 2>/dev/null
-    
-    # Also save to file
-    SAFE_TITLE=$(echo "$VIDEO_ID" | tr -cd '[:alnum:]-_')
-    "$WHISPER" -m "$WHISPER_MODEL" -f "$WAV_FILE" $LANG_FLAG --no-timestamps 2>/dev/null > "$OUTPUT_DIR/${SAFE_TITLE}.txt"
-    echo "" >&2
-    echo "Saved transcript to: $OUTPUT_DIR/${SAFE_TITLE}.txt" >&2
+# Generate output filename
+SAFE_ID=$(echo "$VIDEO_ID" | tr -cd '[:alnum:]-_')
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+TRANSCRIPT_FILE="$OUTPUT_DIR/${TIMESTAMP}_${SAFE_ID}.txt"
+
+# Create metadata header
+{
+    echo "# YouTube Transcript"
+    echo "# Title: $TITLE"
+    echo "# URL: $URL"
+    echo "# Duration: $DURATION"
+    echo "# Transcribed: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "# Language: $LANG"
+    echo ""
+    echo "---"
+    echo ""
+} > "$TRANSCRIPT_FILE"
+
+# Run transcription and append to file
+"$WHISPER" -m "$WHISPER_MODEL" -f "$WAV_FILE" $LANG_FLAG --no-timestamps 2>/dev/null >> "$TRANSCRIPT_FILE"
+
+echo "" >&2
+echo "Saved transcript to: $TRANSCRIPT_FILE" >&2
+echo "Done!" >&2
+
+# Notify OpenClaw if in background mode
+if $BACKGROUND; then
+    notify_openclaw "$TITLE" "$TRANSCRIPT_FILE" "$VIDEO_ID"
 fi
 
-echo "Done!" >&2
+# Output file path for caller
+echo "$TRANSCRIPT_FILE"
