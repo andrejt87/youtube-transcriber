@@ -82,7 +82,7 @@ estimate_time() {
 
 # === ARGUMENT PARSING ===
 URL=""
-LANG="auto"
+LANG="de"
 BACKGROUND=false
 FACTCHECK="n"
 
