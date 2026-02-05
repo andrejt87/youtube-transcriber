@@ -10,7 +10,10 @@ WHISPER="${WHISPER:-/opt/homebrew/bin/whisper-cli}"
 WHISPER_MODEL="${WHISPER_MODEL:-$HOME/.whisper/ggml-medium.bin}"
 TMP_DIR="${TMP_DIR:-/tmp/yt_transcribe}"
 OUTPUT_DIR="${OUTPUT_DIR:-$HOME/.openclaw/workspace/youtube-transcriber/transcripts}"
-NOTIFY_FILE="$HOME/.openclaw/workspace/youtube-transcriber/.pending_notification"
+
+# Telegram notification config
+TELEGRAM_BOT_TOKEN="8380074958:AAFyNGGpYnx5Ts-pAnZvhKN3W2lVs0MyOIo"
+TELEGRAM_CHAT_ID="472279328"
 
 # === FUNCTIONS ===
 usage() {
@@ -19,7 +22,7 @@ usage() {
     echo "Options:"
     echo "  -o, --output DIR     Output directory (default: ~/transcripts)"
     echo "  -l, --language LANG  Force language (default: auto)"
-    echo "  -b, --background     Run in background, notify when done"
+    echo "  -b, --background     Run in background, notify via Telegram"
     echo "  --factcheck y|n      Include factcheck flag in notification"
     echo "  -h, --help           Show this help"
     exit 1
@@ -27,6 +30,43 @@ usage() {
 
 cleanup() {
     rm -rf "$TMP_DIR"
+}
+
+notify() {
+    local message="$1"
+    if $BACKGROUND; then
+        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "text=${message}" \
+            -d "parse_mode=HTML" > /dev/null 2>&1 || true
+    fi
+}
+
+notify_error() {
+    local step="$1"
+    local reason="$2"
+    notify "❌ Fehler bei ${step}: ${reason}"
+}
+
+# Estimate whisper transcription time (roughly 1 min processing per 10 min audio)
+estimate_time() {
+    local duration="$1"
+    # Parse duration (formats: "1:23:45" or "23:45" or "45")
+    local hours=0 mins=0 secs=0
+    if [[ "$duration" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+        hours="${BASH_REMATCH[1]}"
+        mins="${BASH_REMATCH[2]}"
+        secs="${BASH_REMATCH[3]}"
+    elif [[ "$duration" =~ ^([0-9]+):([0-9]+)$ ]]; then
+        mins="${BASH_REMATCH[1]}"
+        secs="${BASH_REMATCH[2]}"
+    elif [[ "$duration" =~ ^([0-9]+)$ ]]; then
+        secs="${BASH_REMATCH[1]}"
+    fi
+    
+    local total_mins=$((hours * 60 + mins + secs / 60))
+    local estimate=$((total_mins / 10 + 1))
+    echo "$estimate"
 }
 
 # === ARGUMENT PARSING ===
@@ -54,6 +94,7 @@ fi
 # === MAIN ===
 mkdir -p "$TMP_DIR"
 mkdir -p "$OUTPUT_DIR"
+trap 'notify_error "Unbekannt" "Script abgebrochen"; cleanup' ERR
 trap cleanup EXIT
 
 echo "=== YouTube Transcriber ===" >&2
@@ -68,22 +109,40 @@ VIDEO_ID=$("$YTDLP" --get-id "$URL" 2>/dev/null || echo "video")
 echo "Title: $TITLE" >&2
 echo "Duration: $DURATION" >&2
 
+# === CHECKPOINT 1: Start ===
+notify "🎬 <b>YouTube Transkription</b>
+Titel: ${TITLE}
+Dauer: ${DURATION}
+Status: Download gestartet..."
+
 # Download audio (Android client bypasses 403 blocks)
 echo "Downloading audio..." >&2
-"$YTDLP" --extractor-args "youtube:player_client=android" \
+if ! "$YTDLP" --extractor-args "youtube:player_client=android" \
     -x --audio-format mp3 \
-    -o "$TMP_DIR/audio.%(ext)s" "$URL" 2>/dev/null
+    -o "$TMP_DIR/audio.%(ext)s" "$URL" 2>/dev/null; then
+    notify_error "Download" "yt-dlp fehlgeschlagen"
+    exit 1
+fi
 
 DOWNLOADED=$(ls "$TMP_DIR"/audio.* 2>/dev/null | head -1)
 if [[ -z "$DOWNLOADED" ]]; then
-    echo "Error: Could not download audio" >&2
+    notify_error "Download" "Keine Audio-Datei gefunden"
     exit 1
 fi
 
 # Convert to WAV for whisper
 echo "Converting to WAV..." >&2
 WAV_FILE="$TMP_DIR/audio.wav"
-ffmpeg -i "$DOWNLOADED" -ar 16000 -ac 1 -f wav "$WAV_FILE" -y 2>/dev/null
+if ! ffmpeg -i "$DOWNLOADED" -ar 16000 -ac 1 -f wav "$WAV_FILE" -y 2>/dev/null; then
+    notify_error "Konvertierung" "ffmpeg fehlgeschlagen"
+    exit 1
+fi
+
+# === CHECKPOINT 2: Download fertig ===
+EST_MINS=$(estimate_time "$DURATION")
+notify "📥 Download fertig
+Status: Starte Transkription...
+Geschätzte Dauer: ~${EST_MINS} Min"
 
 # Transcribe
 echo "Transcribing with Whisper..." >&2
@@ -111,17 +170,25 @@ TRANSCRIPT_FILE="$OUTPUT_DIR/${TIMESTAMP}_${SAFE_ID}.txt"
 } > "$TRANSCRIPT_FILE"
 
 # Run transcription and append to file
-"$WHISPER" -m "$WHISPER_MODEL" -f "$WAV_FILE" $LANG_FLAG --no-timestamps 2>/dev/null >> "$TRANSCRIPT_FILE"
+if ! "$WHISPER" -m "$WHISPER_MODEL" -f "$WAV_FILE" $LANG_FLAG --no-timestamps 2>/dev/null >> "$TRANSCRIPT_FILE"; then
+    notify_error "Transkription" "Whisper fehlgeschlagen"
+    exit 1
+fi
 
 echo "" >&2
 echo "Saved transcript to: $TRANSCRIPT_FILE" >&2
 echo "Done!" >&2
 
-# Write notification file for OpenClaw to pick up
-if $BACKGROUND; then
-    echo "YOUTUBE_DONE|$TRANSCRIPT_FILE|$FACTCHECK|$TITLE" > "$NOTIFY_FILE"
-    echo "Notification written to: $NOTIFY_FILE" >&2
-fi
+# === CHECKPOINT 3: Fertig ===
+FACTCHECK_TEXT="Nein"
+[[ "$FACTCHECK" == "y" ]] && FACTCHECK_TEXT="Ja"
+
+notify "✅ <b>Transkription fertig</b>
+Titel: ${TITLE}
+Datei: ${TRANSCRIPT_FILE}
+Faktencheck: ${FACTCHECK_TEXT}
+
+Antworte mit 'Zusammenfassung' für Details."
 
 # Output file path for caller
 echo "$TRANSCRIPT_FILE"
