@@ -1,12 +1,6 @@
 #!/bin/bash
 # youtube-transcribe.sh - YouTube Video Transkription & Zusammenfassung
 # Nutzt yt-dlp für Audio-Download und whisper-cpp für Transkription
-#
-# Requirements:
-#   - yt-dlp (pip install yt-dlp)
-#   - whisper-cpp (brew install whisper-cpp)
-#   - ffmpeg (brew install ffmpeg)
-#   - Whisper model (download via whisper-cpp)
 
 set -e
 
@@ -16,6 +10,7 @@ WHISPER="${WHISPER:-/opt/homebrew/bin/whisper-cli}"
 WHISPER_MODEL="${WHISPER_MODEL:-$HOME/.whisper/ggml-medium.bin}"
 TMP_DIR="${TMP_DIR:-/tmp/yt_transcribe}"
 OUTPUT_DIR="${OUTPUT_DIR:-$HOME/.openclaw/workspace/youtube-transcriber/transcripts}"
+NOTIFY_FILE="$HOME/.openclaw/workspace/youtube-transcriber/.pending_notification"
 
 # === FUNCTIONS ===
 usage() {
@@ -32,15 +27,6 @@ usage() {
 
 cleanup() {
     rm -rf "$TMP_DIR"
-}
-
-notify_openclaw() {
-    local title="$1"
-    local transcript_file="$2"
-    local factcheck="$3"
-    
-    # Wake OpenClaw with context - this triggers automatic response
-    openclaw cron wake --text "YOUTUBE_DONE|$transcript_file|$factcheck|$title" --mode now 2>/dev/null || true
 }
 
 # === ARGUMENT PARSING ===
@@ -131,9 +117,10 @@ echo "" >&2
 echo "Saved transcript to: $TRANSCRIPT_FILE" >&2
 echo "Done!" >&2
 
-# Notify OpenClaw if in background mode
+# Write notification file for OpenClaw to pick up
 if $BACKGROUND; then
-    notify_openclaw "$TITLE" "$TRANSCRIPT_FILE" "$FACTCHECK"
+    echo "YOUTUBE_DONE|$TRANSCRIPT_FILE|$FACTCHECK|$TITLE" > "$NOTIFY_FILE"
+    echo "Notification written to: $NOTIFY_FILE" >&2
 fi
 
 # Output file path for caller
