@@ -48,6 +48,12 @@ notify_error() {
     notify "❌ Fehler bei ${step}: ${reason}"
 }
 
+# Ping the AI agent via system event
+ping_agent() {
+    local message="$1"
+    /opt/homebrew/bin/openclaw system event --text "$message" --mode now 2>/dev/null || true
+}
+
 # Estimate whisper transcription time (roughly 1 min processing per 10 min audio)
 estimate_time() {
     local duration="$1"
@@ -179,16 +185,19 @@ echo "" >&2
 echo "Saved transcript to: $TRANSCRIPT_FILE" >&2
 echo "Done!" >&2
 
-# === CHECKPOINT 3: Fertig ===
+# === CHECKPOINT 3: Fertig (Telegram) ===
 FACTCHECK_TEXT="Nein"
 [[ "$FACTCHECK" == "y" ]] && FACTCHECK_TEXT="Ja"
 
 notify "✅ <b>Transkription fertig</b>
 Titel: ${TITLE}
 Datei: ${TRANSCRIPT_FILE}
-Faktencheck: ${FACTCHECK_TEXT}
+Faktencheck: ${FACTCHECK_TEXT}"
 
-Antworte mit 'Zusammenfassung' für Details."
+# === PING AGENT: Trigger automatic summary ===
+if $BACKGROUND; then
+    ping_agent "YOUTUBE_DONE|${TRANSCRIPT_FILE}|${FACTCHECK}|${TITLE}"
+fi
 
 # Output file path for caller
 echo "$TRANSCRIPT_FILE"
