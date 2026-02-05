@@ -5,7 +5,8 @@
 set -e
 
 # === CONFIGURATION ===
-YTDLP="${YTDLP:-/Users/andrej/Library/Python/3.9/bin/yt-dlp}"
+YTDLP="${YTDLP:-/opt/homebrew/bin/python3.11 -m yt_dlp}"
+YTDLP_OPTS="--cookies ~/.config/yt-dlp/cookies.txt --remote-components ejs:github"
 WHISPER="${WHISPER:-/opt/homebrew/bin/whisper-cli}"
 WHISPER_MODEL="${WHISPER_MODEL:-$HOME/.whisper/ggml-medium.bin}"
 TMP_DIR="${TMP_DIR:-/tmp/yt_transcribe}"
@@ -46,6 +47,10 @@ notify_error() {
     local step="$1"
     local reason="$2"
     notify "❌ Fehler bei ${step}: ${reason}"
+    # Also ping agent about error
+    if $BACKGROUND; then
+        ping_agent "YOUTUBE_ERROR|${step}|${reason}|${URL}"
+    fi
 }
 
 # Ping the AI agent via system event
@@ -108,9 +113,9 @@ echo "URL: $URL" >&2
 
 # Get video info
 echo "Fetching video info..." >&2
-TITLE=$("$YTDLP" --get-title "$URL" 2>/dev/null || echo "Unknown")
-DURATION=$("$YTDLP" --get-duration "$URL" 2>/dev/null || echo "?")
-VIDEO_ID=$("$YTDLP" --get-id "$URL" 2>/dev/null || echo "video")
+TITLE=$($YTDLP $YTDLP_OPTS --get-title "$URL" 2>/dev/null || echo "Unknown")
+DURATION=$($YTDLP $YTDLP_OPTS --get-duration "$URL" 2>/dev/null || echo "?")
+VIDEO_ID=$($YTDLP $YTDLP_OPTS --get-id "$URL" 2>/dev/null || echo "video")
 
 echo "Title: $TITLE" >&2
 echo "Duration: $DURATION" >&2
@@ -121,9 +126,9 @@ Titel: ${TITLE}
 Dauer: ${DURATION}
 Status: Download gestartet..."
 
-# Download audio (Android client bypasses 403 blocks)
+# Download audio
 echo "Downloading audio..." >&2
-if ! "$YTDLP" --extractor-args "youtube:player_client=android" \
+if ! $YTDLP $YTDLP_OPTS \
     -x --audio-format mp3 \
     -o "$TMP_DIR/audio.%(ext)s" "$URL" 2>/dev/null; then
     notify_error "Download" "yt-dlp fehlgeschlagen"
