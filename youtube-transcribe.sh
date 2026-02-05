@@ -287,9 +287,18 @@ Titel: ${TITLE}
 Datei: ${TRANSCRIPT_FILE}
 Faktencheck: ${FACTCHECK_TEXT}"
 
-# === PING AGENT: Trigger automatic summary ===
+# === PING AGENT: Trigger automatic summary via one-shot cron job ===
 if $BACKGROUND; then
-    ping_agent "YOUTUBE_DONE|${TRANSCRIPT_FILE}|${FACTCHECK}|${TITLE}"
+    # Create a one-shot cron job that fires immediately
+    /opt/homebrew/bin/openclaw cron add \
+        --name "YouTube Summary" \
+        --at "$(date -u -v+10S '+%Y-%m-%dT%H:%M:%SZ')" \
+        --session isolated \
+        --message "YOUTUBE_DONE|${TRANSCRIPT_FILE}|${FACTCHECK}|${TITLE} - Lies das Transkript, erstelle eine Zusammenfassung auf Deutsch, sende sie an Telegram (chat_id: 472279328), und lösche das Transkript." \
+        --deliver \
+        --channel telegram \
+        --to "472279328" \
+        --delete-after-run 2>/dev/null || ping_agent "YOUTUBE_DONE|${TRANSCRIPT_FILE}|${FACTCHECK}|${TITLE}"
 fi
 
 # Output file path for caller
