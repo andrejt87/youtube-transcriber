@@ -80,9 +80,76 @@ estimate_time() {
     echo "$estimate"
 }
 
+# Detect language by sampling random positions in the audio (max 10 attempts)
+detect_language() {
+    local wav_file="$1"
+    local duration_secs="$2"
+    local max_attempts=10
+    local sample_duration=10  # 10 second samples
+    
+    for attempt in $(seq 1 $max_attempts); do
+        # Random start position (avoid first 10% and last 10%)
+        local safe_start=$((duration_secs / 10))
+        local safe_end=$((duration_secs * 9 / 10 - sample_duration))
+        if [[ $safe_end -le $safe_start ]]; then
+            safe_start=0
+            safe_end=$((duration_secs - sample_duration))
+        fi
+        local random_start=$((RANDOM % (safe_end - safe_start + 1) + safe_start))
+        
+        # Extract sample
+        local sample_file="/tmp/lang_sample_${attempt}.wav"
+        ffmpeg -i "$wav_file" -ss "$random_start" -t "$sample_duration" -y "$sample_file" 2>/dev/null
+        
+        # Try to detect language with whisper
+        local result=$("$WHISPER" -m "$WHISPER_MODEL" -f "$sample_file" --no-timestamps -l auto 2>/dev/null | head -20)
+        rm -f "$sample_file"
+        
+        # Check if we got actual content (not just "foreign language")
+        if [[ ! "$result" =~ "foreign language" ]] && [[ -n "$result" ]] && [[ ! "$result" =~ ^[[:space:]]*$ ]]; then
+            # Try to detect language from content
+            # If mostly German characters/words, return de
+            if echo "$result" | grep -qiE "(und|der|die|das|ist|nicht|ein|ich|wir|sie|haben|werden|kann|auch|nach|für|auf|mit|sind|war|bei|oder|wie|noch|aber|dann|wenn|nur|schon|mehr|über|diese|durch|vor|hier|muss|immer|gegen|heute|weil|unter|viel)"; then
+                echo "de"
+                return 0
+            # If mostly English, return en
+            elif echo "$result" | grep -qiE "(the|and|that|this|with|from|have|are|was|were|been|being|what|when|where|which|who|will|would|could|should|there|their|about|into|some|than|them|then|these|time|very|just|know|take|come|made|find|here|many|only|other|over|such|than|through)"; then
+                echo "en"
+                return 0
+            else
+                # Got content but couldn't determine language, use auto
+                echo "auto"
+                return 0
+            fi
+        fi
+        
+        echo "Attempt $attempt: No clear language detected, trying another position..." >&2
+    done
+    
+    # Fallback to German after max attempts
+    echo "de"
+}
+
+# Get duration in seconds for language detection
+get_duration_seconds() {
+    local duration="$1"
+    local hours=0 mins=0 secs=0
+    if [[ "$duration" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+        hours="${BASH_REMATCH[1]}"
+        mins="${BASH_REMATCH[2]}"
+        secs="${BASH_REMATCH[3]}"
+    elif [[ "$duration" =~ ^([0-9]+):([0-9]+)$ ]]; then
+        mins="${BASH_REMATCH[1]}"
+        secs="${BASH_REMATCH[2]}"
+    elif [[ "$duration" =~ ^([0-9]+)$ ]]; then
+        secs="${BASH_REMATCH[1]}"
+    fi
+    echo $((hours * 3600 + mins * 60 + secs))
+}
+
 # === ARGUMENT PARSING ===
 URL=""
-LANG="de"
+LANG="auto"
 BACKGROUND=false
 FACTCHECK="n"
 
@@ -155,8 +222,17 @@ notify "📥 Download fertig
 Status: Starte Transkription...
 Geschätzte Dauer: ~${EST_MINS} Min"
 
+# Detect language if set to auto
+echo "Detecting language..." >&2
+if [[ "$LANG" == "auto" ]]; then
+    DURATION_SECS=$(get_duration_seconds "$DURATION")
+    DETECTED_LANG=$(detect_language "$WAV_FILE" "$DURATION_SECS")
+    echo "Detected language: $DETECTED_LANG" >&2
+    LANG="$DETECTED_LANG"
+fi
+
 # Transcribe
-echo "Transcribing with Whisper..." >&2
+echo "Transcribing with Whisper (language: $LANG)..." >&2
 LANG_FLAG=""
 if [[ "$LANG" != "auto" ]]; then
     LANG_FLAG="-l $LANG"
