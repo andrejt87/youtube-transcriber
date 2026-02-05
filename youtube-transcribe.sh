@@ -289,6 +289,8 @@ Faktencheck: ${FACTCHECK_TEXT}"
 
 # === PING AGENT: Trigger automatic summary via one-shot cron job ===
 if $BACKGROUND; then
+    notify "🤖 Starte Zusammenfassung..."
+    
     # Create a one-shot cron job that fires immediately
     /opt/homebrew/bin/openclaw cron add \
         --name "YouTube Summary" \
