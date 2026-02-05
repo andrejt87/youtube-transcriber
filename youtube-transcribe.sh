@@ -22,11 +22,11 @@ usage() {
     echo "Usage: $0 <youtube-url> [options]"
     echo ""
     echo "Options:"
-    echo "  -o, --output DIR    Output directory (default: ~/transcripts)"
-    echo "  -l, --language LANG Force language (default: auto)"
-    echo "  -t, --transcript    Output transcript only (no VTT)"
-    echo "  -b, --background    Run in background, notify when done"
-    echo "  -h, --help          Show this help"
+    echo "  -o, --output DIR     Output directory (default: ~/transcripts)"
+    echo "  -l, --language LANG  Force language (default: auto)"
+    echo "  -b, --background     Run in background, notify when done"
+    echo "  --factcheck y|n      Include factcheck flag in notification"
+    echo "  -h, --help           Show this help"
     exit 1
 }
 
@@ -37,24 +37,24 @@ cleanup() {
 notify_openclaw() {
     local title="$1"
     local transcript_file="$2"
-    local video_id="$3"
+    local factcheck="$3"
     
-    # Wake OpenClaw with context
-    openclaw cron wake --text "YouTube-Transkription fertig: \"$title\" - Datei: $transcript_file (Video-ID: $video_id). Bitte Zusammenfassung und Faktencheck erstellen." --mode now 2>/dev/null || true
+    # Wake OpenClaw with context - this triggers automatic response
+    openclaw cron wake --text "YOUTUBE_DONE|$transcript_file|$factcheck|$title" --mode now 2>/dev/null || true
 }
 
 # === ARGUMENT PARSING ===
 URL=""
 LANG="auto"
-TRANSCRIPT_ONLY=false
 BACKGROUND=false
+FACTCHECK="n"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         -o|--output) OUTPUT_DIR="$2"; shift 2 ;;
         -l|--language) LANG="$2"; shift 2 ;;
-        -t|--transcript) TRANSCRIPT_ONLY=true; shift ;;
         -b|--background) BACKGROUND=true; shift ;;
+        --factcheck) FACTCHECK="$2"; shift 2 ;;
         -h|--help) usage ;;
         -*) echo "Unknown option: $1"; usage ;;
         *) URL="$1"; shift ;;
@@ -133,7 +133,7 @@ echo "Done!" >&2
 
 # Notify OpenClaw if in background mode
 if $BACKGROUND; then
-    notify_openclaw "$TITLE" "$TRANSCRIPT_FILE" "$VIDEO_ID"
+    notify_openclaw "$TITLE" "$TRANSCRIPT_FILE" "$FACTCHECK"
 fi
 
 # Output file path for caller
