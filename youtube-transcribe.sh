@@ -9,7 +9,7 @@ YTDLP="${YTDLP:-/Users/andrej/Library/Python/3.9/bin/yt-dlp}"
 WHISPER="${WHISPER:-/opt/homebrew/bin/whisper-cli}"
 WHISPER_MODEL="${WHISPER_MODEL:-$HOME/.whisper/ggml-medium.bin}"
 TMP_DIR="${TMP_DIR:-/tmp/yt_transcribe}"
-OUTPUT_DIR="${OUTPUT_DIR:-$HOME/.openclaw/workspace/youtube-transcriber/transcripts}"
+OUTPUT_DIR="${OUTPUT_DIR:-/tmp/yt_transcripts}"
 
 # Telegram notification config
 TELEGRAM_BOT_TOKEN="8380074958:AAFyNGGpYnx5Ts-pAnZvhKN3W2lVs0MyOIo"
